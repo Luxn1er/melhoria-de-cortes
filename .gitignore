@@ -1,0 +1,14 @@
+# Byte-compiled
+__pycache__/
+*.pyc
+*.pyo
+
+# SQLite
+ProduçãoAlt/*.sqlite3
+
+# XLSX exports
+ProduçãoAlt/*.xlsx
+
+# IDE
+.vscode/
+.idea/
