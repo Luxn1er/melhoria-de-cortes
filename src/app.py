@@ -3,6 +3,7 @@
 from __future__ import annotations
 import os
 import queue
+import sys
 import threading
 import time
 from typing import Dict, List, Optional, Tuple
@@ -38,6 +39,13 @@ ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
 
+def _obter_base_dir() -> str:
+    """Retorna o diretorio real do projeto, mesmo quando embutido (.exe)."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(os.path.abspath(sys.argv[0]))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 # ===========================================================================
 # APP PRINCIPAL
 # ===========================================================================
@@ -60,10 +68,8 @@ class AppMRX(ctk.CTk):
         self._progress_queue: queue.Queue[Tuple[float, str]] = queue.Queue()
 
         # Banco de dados
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        data_dir = os.path.join(
-            os.path.dirname(base_dir), "ProduçãoAlt"
-        )
+        _base = _obter_base_dir()
+        data_dir = os.path.join(_base, "ProduçãoAlt")
         self.db = MRXDatabase(os.path.join(data_dir, "mrx_otimizador.sqlite3"))
 
         # Layout
@@ -224,7 +230,7 @@ class AppMRX(ctk.CTk):
                 # Atualiza BD
                 try:
                     import sqlite3
-                    db_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ProduçãoAlt")
+                    db_dir = os.path.join(_obter_base_dir(), "ProduçãoAlt")
                     db_path = os.path.join(db_dir, "mrx_otimizador.sqlite3")
                     with sqlite3.connect(db_path) as con:
                         con.execute("DELETE FROM estoque WHERE largura = ?", (ult_larg,))
@@ -423,8 +429,8 @@ class AppMRX(ctk.CTk):
             from openpyxl import Workbook
             from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            pasta = os.path.join(os.path.dirname(base_dir), "ProduçãoAlt")
+            base_dir = _obter_base_dir()
+            pasta = os.path.join(base_dir, "ProduçãoAlt")
             os.makedirs(pasta, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             caminho = os.path.join(pasta, f"Puxadas_MRX_{ts}.xlsx")
