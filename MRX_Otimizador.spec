@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['src', 'src.app', 'src.database', 'src.helpers', 'src.knapsack', 'src.models', 'src.optimizer', 'src.policy', 'src.ui', 'src.ui.canvas_viz', 'src.ui.report', 'src.ui.sobras_window']
+hiddenimports = ['src', 'src.app', 'src.app.main', 'src.database', 'src.helpers', 'src.knapsack', 'src.models', 'src.optimizer', 'src.policy', 'src.ui', 'src.ui.canvas_viz', 'src.ui.report', 'src.ui.sobras_window']
 tmp_ret = collect_all('customtkinter')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('openpyxl')

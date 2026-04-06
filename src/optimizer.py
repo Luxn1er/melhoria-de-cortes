@@ -1,6 +1,7 @@
 """Motor de otimização — geração de padrões repetíveis e tratamento de residuais."""
 
 from __future__ import annotations
+import time
 from collections import Counter
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -154,40 +155,42 @@ class OtimizadorProducao:
             if not res:
                 break
 
-            path, soma, _ = melhor_combinacao_residuais(L, res, trim_min_mm=20)
+            path, soma, _ = melhor_combinacao_residuais(
+                int(L), res, trim_min_mm=20
+            )
             if soma <= 0:
                 path_any, soma_any, _ = melhor_combinacao_residuais(
-                    L, res, trim_min_mm=0
+                    int(L), res, trim_min_mm=0
                 )
                 if soma_any > 0:
                     self.refile_insuficiente_detectado = True
                     self.sugestao_base_residuo = list(path_any)
-                    self.sobra_residuo_mm = L - soma_any
+                    self.sobra_residuo_mm = int(L - soma_any)
                     break
                 self.abrir_janela_sobras = True
                 self.sugestao_base_residuo = None
-                self.sobra_residuo_mm = L
+                self.sobra_residuo_mm = int(L)
                 break
 
-            sobra = L - soma
+            sobra = int(L - soma)
             self.sobra_residuo_mm = sobra
 
             if 20 <= sobra <= 50:
-                split = RefilePolicy.repartir(sobra)
+                split = RefilePolicy.repartir(int(sobra))
                 if split is not None:
                     re_esq, re_dir, faixa = split
                     self._consumir_padrao(path, 1)
                     esq_l, dir_l = aplicar_layout_na_regua(
-                        self.jumbo.largura_mm, path, re_esq, re_dir
+                        int(self.jumbo.largura_mm), path, int(re_esq), int(re_dir)
                     )
                     self.plano.append(Puxada(
-                        largura_jumbo=self.jumbo.largura_mm,
+                        largura_jumbo=int(self.jumbo.largura_mm),
                         bobinas=[Bobina(w, 1) for w in path],
                         posicoes_esquerda_strip=esq_l,
                         posicoes_fieis_direita_strip=dir_l,
                         eixos=intercalar_eixos(len(path)),
-                        refile_esquerdo_mm=re_esq,
-                        refile_direito_mm=re_dir,
+                        refile_esquerdo_mm=int(re_esq),
+                        refile_direito_mm=int(re_dir),
                         completa_jumbo=True,
                         repeticao=1,
                         faixa_refile=faixa,
@@ -229,6 +232,8 @@ class OtimizadorProducao:
                 on_progress(1.0, "Sem estoque para otimizar.")
             return
 
+        start = time.monotonic()
+
         while True:
             larguras = sorted(self._larguras_disponiveis(), reverse=True)
             if not larguras:
@@ -239,27 +244,38 @@ class OtimizadorProducao:
 
             pat, reps, re_esq, re_dir, faixa_usada = prox
             esq_l, dir_l = aplicar_layout_na_regua(
-                self.jumbo.largura_mm, pat, re_esq, re_dir
+                int(self.jumbo.largura_mm), pat, int(re_esq), int(re_dir)
             )
             self._consumir_padrao(pat, reps)
 
             self.plano.append(Puxada(
-                largura_jumbo=self.jumbo.largura_mm,
+                largura_jumbo=int(self.jumbo.largura_mm),
                 bobinas=[Bobina(w, 1) for w in pat],
                 posicoes_esquerda_strip=esq_l,
                 posicoes_fieis_direita_strip=dir_l,
                 eixos=intercalar_eixos(len(pat)),
-                refile_esquerdo_mm=re_esq,
-                refile_direito_mm=re_dir,
+                refile_esquerdo_mm=int(re_esq),
+                refile_direito_mm=int(re_dir),
                 completa_jumbo=True,
-                repeticao=reps,
+                repeticao=int(reps),
                 faixa_refile=faixa_usada,
             ))
 
             if on_progress:
                 consumidas = total_inicial - sum(self.estoque.values())
                 frac = min(0.97, consumidas / max(1, total_inicial))
-                on_progress(frac, f"Gerando puxadas... ({len(self.plano)} criada(s))")
+                elapsed = time.monotonic() - start
+                mins = int(elapsed) // 60
+                secs = int(elapsed) % 60
+                tempo = f"{mins}m{secs:02d}s" if mins else f"{secs}s"
+                on_progress(frac, f"Gerando puxadas... ({len(self.plano)} criada(s)) — {tempo}")
+
+        if on_progress:
+            elapsed = time.monotonic() - start
+            mins = int(elapsed) // 60
+            secs = int(elapsed) % 60
+            tempo = f"{mins}m{secs:02d}s" if mins else f"{secs}s"
+            on_progress(0.98, f"Residuais e finalização... ({tempo} decorrido)")
 
         self._finalizar_residuais_inteligente(on_progress)
 

@@ -12,3 +12,6 @@ ProduçãoAlt/*.xlsx
 # IDE
 .vscode/
 .idea/
+
+# PyInstaller build artifacts
+build/

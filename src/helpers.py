@@ -2,7 +2,42 @@
 
 from __future__ import annotations
 from collections import Counter
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+
+# Limite máximo de iterações por alvo para evitar travamento
+COMPOSICOES_MAX_POR_ALVO = 50_000
+
+
+def compor_padroes_nao_crescentes(alvo: int, partes: List[int]):
+    """
+    Gera composições em ordem não crescente que somam exatamente *alvo*.
+
+    DFS iterativo com pruning (corta ramo se resto < menor peça) e limite
+    de iterações para evitar travamento com bobinas pequenas.
+    """
+    parts = sorted(set(partes), reverse=True)
+    if alvo <= 0 or not parts:
+        return
+    min_part = parts[-1]
+    stack: list[tuple[int, list[int], int | None]] = [(alvo, [], None)]
+    count = 0
+    while stack:
+        rest, path, max_s = stack.pop()
+        if rest == 0:
+            yield list(path)
+            continue
+        # Pruning: se o resto é menor que a menor peça, este ramo é inútil
+        if rest < min_part:
+            continue
+        # Limite por alvo
+        count += 1
+        if count > COMPOSICOES_MAX_POR_ALVO:
+            return
+        for w in parts:
+            if w > rest or (max_s is not None and w > max_s):
+                continue
+            stack.append((rest - w, path + [w], w))
 
 
 def intercalar_eixos(n: int) -> List[str]:
@@ -26,29 +61,6 @@ def aplicar_layout_na_regua(
         cursor -= w
         dir_l.append(cursor)
     return esq_l, dir_l
-
-
-def compor_padroes_nao_crescentes(alvo: int, partes: List[int]):
-    """
-    Gera todas as composições em ordem não crescente que somam exatamente *alvo*.
-
-    DFS iterativo (pilha) para evitar estouro de recursão em jumbos com muitas
-    tiras finas.
-    """
-    parts = sorted(set(partes), reverse=True)
-    if alvo <= 0 or not parts:
-        return
-    stack = []  # type: list[tuple[int, list[int], int | None]]
-    stack.append((alvo, [], None))
-    while stack:
-        rest, path, max_s = stack.pop()
-        if rest == 0:
-            yield list(path)
-            continue
-        for w in parts:
-            if w > rest or (max_s is not None and w > max_s):
-                continue
-            stack.append((rest - w, path + [w], w))
 
 
 def formatar_lista_larguras(larguras: List[int]) -> str:
