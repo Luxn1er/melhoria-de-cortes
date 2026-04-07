@@ -7,6 +7,8 @@ from typing import Dict, List, Optional, Tuple
 
 # Limite máximo de iterações por alvo para evitar travamento
 COMPOSICOES_MAX_POR_ALVO = 50_000
+# Máximo de facas na máquina — cada puxada pode ter no máximo 23 bobinas
+FACAS_MAX = 23
 
 
 def compor_padroes_nao_crescentes(alvo: int, partes: List[int]):
@@ -30,6 +32,9 @@ def compor_padroes_nao_crescentes(alvo: int, partes: List[int]):
         # Pruning: se o resto é menor que a menor peça, este ramo é inútil
         if rest < min_part:
             continue
+        # Pruning: número de facas excedido
+        if len(path) >= FACAS_MAX:
+            continue
         # Limite por alvo
         count += 1
         if count > COMPOSICOES_MAX_POR_ALVO:
@@ -37,6 +42,9 @@ def compor_padroes_nao_crescentes(alvo: int, partes: List[int]):
         for w in parts:
             if w > rest or (max_s is not None and w > max_s):
                 continue
+            # Pruning: se adicionar esta bobina ultrapassa facas
+            if len(path) + 1 > FACAS_MAX:
+                break
             stack.append((rest - w, path + [w], w))
 
 
