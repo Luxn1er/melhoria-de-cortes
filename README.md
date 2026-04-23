@@ -1,4 +1,4 @@
-# MRX — Otimizador de Corte Industrial v2.0
+# SmartCut-Sistema de otimizção de Produção
 
 Sistema desktop para otimização de corte de bobinas jumbo em bobinas menores, resolvento o problema clássico de *One-Dimensional Cutting Stock Problem* com regras de refile industrial.
 
