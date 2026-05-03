@@ -1,6 +1,6 @@
 # SmartCut-Sistema de otimizção de Produção
 
-Sistema desktop para otimização de corte de bobinas jumbo em bobinas menores, resolvento o problema clássico de *One-Dimensional Cutting Stock Problem* com regras de refile industrial.
+Sistema desktop para otimização de corte de bobinas jumbo em bobinas menores, o sistema monta automaticamente as ordens de produção dos materiais.
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![customtkinter](https://img.shields.io/badge/GUI-customtkinter-green)
@@ -69,4 +69,4 @@ python mrx_otimizador.py
 
 ## Licença
 
-Proprietário — Todos os direitos reservados.
+Proprietário Luxn1er— Todos os direitos reservados.
