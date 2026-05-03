@@ -140,3 +140,24 @@ def agrupamento_base_sobras(
 def montar_larguras_puxada(base_list: List[int], extras: List[int]) -> List[int]:
     """Concatena base e extras para a lista final de larguras."""
     return list(base_list) + list(extras)
+
+
+def calcular_facas_puxada(puxada, medida_inicial_mm: int) -> Tuple[List[Tuple[int, int, int, str]], int, int]:
+    """
+    Calcula a posicao das facas na regua traseira da maquina.
+
+    A referencia fisica parte da medida inicial informada pelo operador:
+    primeira faca = medida inicial - refile esquerdo. Depois, cada bobina
+    subtrai sua largura, passando por zero e seguindo para valores negativos.
+    """
+    cursor = int(medida_inicial_mm) - int(puxada.refile_esquerdo_mm)
+    linhas: List[Tuple[int, int, int, str]] = []
+
+    for i, bob in enumerate(puxada.bobinas, start=1):
+        largura = int(bob.largura)
+        eixo = puxada.eixos[i - 1] if i - 1 < len(puxada.eixos) else ""
+        linhas.append((i, int(cursor), largura, str(eixo)))
+        cursor -= largura
+
+    total_corte = sum(int(bob.largura) for bob in puxada.bobinas)
+    return linhas, int(cursor), int(total_corte)

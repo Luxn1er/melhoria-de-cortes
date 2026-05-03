@@ -3,6 +3,7 @@
 from __future__ import annotations
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -25,6 +26,7 @@ from src.helpers import (
     expandir_base_tuple,
     agrupamento_base_sobras,
     intercalar_eixos,
+    calcular_facas_puxada,
 )
 from src.ui.report import renderizar_relatorio
 from src.ui.canvas_viz import desenhar_puxada
@@ -64,7 +66,8 @@ class AppMRX(ctk.CTk):
         self.plano_atual: List[Puxada] = []
         self.residuais_atuais: List[Tuple[int, int]] = []
         self.ultima_execucao_id: Optional[int] = None
-        self._historico_adicoes: List[Tuple[int, int]] = []  # cronológico
+        self.medida_inicial_atual: int = 795
+        self._historico_adicoes: List[List[Tuple[int, int]]] = []  # lotes cronologicos
         self._progress_queue: queue.Queue[Tuple[float, str]] = queue.Queue()
 
         # Banco de dados
@@ -95,6 +98,12 @@ class AppMRX(ctk.CTk):
         self.ent_jumbo.insert(0, "1565")
         self.ent_jumbo.pack(pady=10, padx=20)
 
+        self.ent_medida_inicial = ctk.CTkEntry(
+            self.sidebar, placeholder_text="Med. inicial (mm)"
+        )
+        self.ent_medida_inicial.insert(0, str(self.medida_inicial_atual))
+        self.ent_medida_inicial.pack(pady=10, padx=20)
+
         ctk.CTkLabel(self.sidebar, text="Adicionar Bobina:").pack(pady=(20, 5))
         self.ent_larg = ctk.CTkEntry(self.sidebar, placeholder_text="Largura (mm)")
         self.ent_larg.pack(pady=5, padx=20)
@@ -104,6 +113,9 @@ class AppMRX(ctk.CTk):
         ctk.CTkButton(
             self.sidebar, text="➕ Adicionar", command=self.add_bobina
         ).pack(pady=20, padx=20)
+        ctk.CTkButton(
+            self.sidebar, text="Importar Puxadas", command=self.abrir_importar_puxadas
+        ).pack(pady=10, padx=20)
         ctk.CTkButton(
             self.sidebar, text="📤 Exportar Planilha", command=self.exportar_planilha
         ).pack(pady=10, padx=20)
@@ -209,35 +221,156 @@ class AppMRX(ctk.CTk):
                 self.estoque_atividades.items(), key=lambda x: x[0], reverse=True
             )
             self.db.upsert_estoque(l, self.estoque_atividades[l])
-            self._historico_adicoes.append((l, q))
+            self._historico_adicoes.append([(l, q)])
             self.ent_larg.delete(0, "end")
             self.ent_qtd.delete(0, "end")
             self._atualizar_texto_estoque()
         except Exception as e:
             messagebox.showerror("Erro", f"Dados inválidos.\n{e}")
 
+    def abrir_importar_puxadas(self) -> None:
+        """Abre janela para colar varias bobinas de uma vez."""
+        win = ctk.CTkToplevel(self)
+        win.title("Importar Puxadas")
+        win.geometry("620x520")
+        win.resizable(True, True)
+        win.transient(self)
+        win.grab_set()
+        win.grid_columnconfigure(0, weight=1)
+        win.grid_rowconfigure(1, weight=1)
+
+        header = ctk.CTkFrame(win, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
+        header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            header,
+            text="Cole as bobinas copiadas da planilha",
+            font=("Roboto", 18, "bold"),
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            header,
+            text="Formatos aceitos: 1200 3, 1200;3, 1200x3 ou somente 1200 para quantidade 1.",
+            font=("Roboto", 12),
+            text_color="#A0A0A0",
+            anchor="w",
+            wraplength=560,
+        ).grid(row=1, column=0, sticky="ew", pady=(6, 0))
+
+        txt_import = ctk.CTkTextbox(win, font=("Consolas", 13))
+        txt_import.grid(row=1, column=0, sticky="nsew", padx=16, pady=8)
+
+        lbl_status = ctk.CTkLabel(
+            win, text="", anchor="w", text_color="#FFC107", wraplength=560
+        )
+        lbl_status.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 8))
+
+        footer = ctk.CTkFrame(win, fg_color="transparent")
+        footer.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 16))
+        footer.grid_columnconfigure(0, weight=1)
+        footer.grid_columnconfigure(1, weight=1)
+
+        def confirmar() -> None:
+            conteudo = txt_import.get("1.0", "end")
+            itens, avisos = self._parse_importacao_puxadas(conteudo)
+            if not itens:
+                lbl_status.configure(
+                    text="Nenhuma linha valida encontrada. Cole pelo menos uma largura."
+                )
+                return
+
+            agregados: Dict[int, int] = {}
+            for largura, qtd in itens:
+                agregados[largura] = agregados.get(largura, 0) + qtd
+
+            lote = sorted(agregados.items(), key=lambda x: x[0], reverse=True)
+            for largura, qtd in lote:
+                self.estoque_atividades[largura] = (
+                    self.estoque_atividades.get(largura, 0) + qtd
+                )
+                self.db.upsert_estoque(largura, self.estoque_atividades[largura])
+
+            self._historico_adicoes.append(lote)
+            self.itens_entrada = sorted(
+                self.estoque_atividades.items(), key=lambda x: x[0], reverse=True
+            )
+            self._atualizar_texto_estoque()
+
+            total_bobinas = sum(qtd for _, qtd in lote)
+            msg = f"{total_bobinas} bobina(s) importada(s) em {len(lote)} medida(s)."
+            if avisos:
+                msg += f"\n{len(avisos)} linha(s) ignorada(s)."
+            messagebox.showinfo("Importacao concluida", msg)
+            win.destroy()
+
+        ctk.CTkButton(
+            footer, text="Importar", fg_color="#287d3c", command=confirmar
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        ctk.CTkButton(
+            footer, text="Cancelar", fg_color="#b03a2e", command=win.destroy
+        ).grid(row=0, column=1, sticky="ew", padx=(8, 0))
+
+        txt_import.focus_set()
+
+    @staticmethod
+    def _parse_importacao_puxadas(conteudo: str) -> Tuple[List[Tuple[int, int]], List[str]]:
+        """
+        Interpreta linhas coladas de planilha/texto.
+
+        Padrao principal: largura quantidade. Com uma unica largura, usa qtd=1.
+        Tambem aceita notacao com "x", como 1200x3 ou 3x1200.
+        """
+        itens: List[Tuple[int, int]] = []
+        avisos: List[str] = []
+
+        for idx, raw in enumerate(conteudo.splitlines(), start=1):
+            linha = raw.strip()
+            if not linha:
+                continue
+
+            nums = [int(n) for n in re.findall(r"\d+", linha)]
+            if not nums:
+                avisos.append(f"Linha {idx}: sem numeros")
+                continue
+
+            pares: List[Tuple[int, int]] = []
+            if "x" in linha.lower() and len(nums) >= 2:
+                a, b = nums[0], nums[1]
+                if a <= 100 and b > a:
+                    pares.append((b, a))
+                else:
+                    pares.append((a, b))
+            elif len(nums) == 1:
+                pares.append((nums[0], 1))
+            elif len(nums) % 2 == 0:
+                pares.extend((nums[i], nums[i + 1]) for i in range(0, len(nums), 2))
+            else:
+                pares.append((nums[0], nums[1]))
+
+            for largura, qtd in pares:
+                if largura <= 0 or qtd <= 0:
+                    avisos.append(f"Linha {idx}: largura/quantidade invalida")
+                    continue
+                itens.append((int(largura), int(qtd)))
+
+        return itens, avisos
+
     def desfazer(self) -> None:
         """Remove a última bobina adicionada (desfaz)."""
         if not self._historico_adicoes:
             messagebox.showinfo("Info", "Nada para desfazer.")
             return
-        ult_larg, ult_qtd = self._historico_adicoes.pop()
+        lote = self._historico_adicoes.pop()
         # Remove do estoque
-        if ult_larg in self.estoque_atividades:
-            self.estoque_atividades[ult_larg] -= ult_qtd
-            if self.estoque_atividades[ult_larg] <= 0:
-                del self.estoque_atividades[ult_larg]
-                # Atualiza BD
-                try:
-                    import sqlite3
-                    db_dir = os.path.join(_obter_base_dir(), "ProduçãoAlt")
-                    db_path = os.path.join(db_dir, "mrx_otimizador.sqlite3")
-                    with sqlite3.connect(db_path) as con:
-                        con.execute("DELETE FROM estoque WHERE largura = ?", (ult_larg,))
-                except Exception:
-                    pass
-            else:
-                self.db.upsert_estoque(ult_larg, self.estoque_atividades[ult_larg])
+        for ult_larg, ult_qtd in lote:
+            if ult_larg in self.estoque_atividades:
+                self.estoque_atividades[ult_larg] -= ult_qtd
+                if self.estoque_atividades[ult_larg] <= 0:
+                    del self.estoque_atividades[ult_larg]
+                else:
+                    self.db.upsert_estoque(ult_larg, self.estoque_atividades[ult_larg])
+        self.db.substituir_estoque(list(self.estoque_atividades.items()))
         self.itens_entrada = sorted(
             self.estoque_atividades.items(), key=lambda x: x[0], reverse=True
         )
@@ -274,6 +407,17 @@ class AppMRX(ctk.CTk):
                 return
         except Exception as e:
             messagebox.showerror("Erro", f"Jumbo inválido.\n{e}")
+            return
+        try:
+            medida_inicial_val = int(self.ent_medida_inicial.get())
+            if medida_inicial_val <= 0:
+                messagebox.showwarning(
+                    "Aviso", "Medida inicial deve ser maior que zero."
+                )
+                return
+            self.medida_inicial_atual = medida_inicial_val
+        except Exception as e:
+            messagebox.showerror("Erro", f"Medida inicial inválida.\n{e}")
             return
 
         self._iniciar_loading("Processando algoritmos...")
@@ -414,7 +558,9 @@ class AppMRX(ctk.CTk):
         self, plano: List[Puxada], residuais: List[Tuple[int, int]]
     ) -> None:
         self.lbl_estoque_titulo.grid_remove()
-        renderizar_relatorio(self.txt, plano, residuais)
+        renderizar_relatorio(
+            self.txt, plano, residuais, self.medida_inicial_atual
+        )
 
     # ---- exportação --------------------------------------------------------
 
@@ -438,10 +584,13 @@ class AppMRX(ctk.CTk):
             wb = Workbook()
             ws = wb.active
             ws.title = "Puxadas"
+            ws_facas = wb.create_sheet("Facas")
 
             # Estilos
             header_font = Font(bold=True, size=11, color="FFFFFF")
             header_fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
+            yellow_fill = PatternFill(start_color="FFF200", end_color="FFF200", fill_type="solid")
+            peach_fill = PatternFill(start_color="F8CBAD", end_color="F8CBAD", fill_type="solid")
             center = Alignment(horizontal="center", vertical="center", wrap_text=True)
             header_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
             thin_border = Border(
@@ -467,12 +616,32 @@ class AppMRX(ctk.CTk):
                     self._escrever_celula(ws, row=j, col=col, value=texto,
                                           alignment=center, border=thin_border)
 
+                self._escrever_bloco_facas_excel(
+                    ws_facas,
+                    puxada=p,
+                    indice=i,
+                    start_col=1 + (i - 1) * 7,
+                    medida_inicial_mm=self.medida_inicial_atual,
+                    header_font=header_font,
+                    header_fill=header_fill,
+                    yellow_fill=yellow_fill,
+                    peach_fill=peach_fill,
+                    center=center,
+                    header_center=header_center,
+                    thin_border=thin_border,
+                )
+
             # Ajustar largura das colunas automaticamente
             for cell in ws[1]:
                 col_letter = cell.column_letter
                 ws.column_dimensions[col_letter].width = 18
+            for col in range(1, ws_facas.max_column + 1):
+                ws_facas.column_dimensions[
+                    ws_facas.cell(row=1, column=col).column_letter
+                ].width = 13
 
             ws.freeze_panes = "A1"
+            ws_facas.freeze_panes = "A4"
 
             wb.save(caminho)
 
@@ -492,6 +661,106 @@ class AppMRX(ctk.CTk):
             cel.alignment = alignment
         if border:
             cel.border = border
+
+    def _escrever_bloco_facas_excel(
+        self,
+        ws,
+        puxada: Puxada,
+        indice: int,
+        start_col: int,
+        medida_inicial_mm: int,
+        header_font,
+        header_fill,
+        yellow_fill,
+        peach_fill,
+        center,
+        header_center,
+        thin_border,
+    ) -> None:
+        facas, pos_final, total_corte = calcular_facas_puxada(
+            puxada, medida_inicial_mm
+        )
+        col = start_col
+        headers = ["FACA", "POSICAO", "BOBINAS", "Inferior", "Superior"]
+
+        self._escrever_celula(
+            ws, 1, col, f"PUXADA {indice:02d} ({puxada.repeticao}x)",
+            font=header_font, fill=header_fill,
+            alignment=header_center, border=thin_border,
+        )
+        self._escrever_celula(ws, 1, col + 1, "JUMBO", alignment=center, border=thin_border)
+        self._escrever_celula(
+            ws, 1, col + 2, puxada.largura_jumbo,
+            fill=yellow_fill, alignment=center, border=thin_border,
+        )
+        self._escrever_celula(ws, 2, col + 1, "REFILE", alignment=center, border=thin_border)
+        self._escrever_celula(
+            ws, 2, col + 2, puxada.refile_esquerdo_mm,
+            fill=yellow_fill, alignment=center, border=thin_border,
+        )
+        self._escrever_celula(ws, 3, col + 1, "MED. INIC.", alignment=center, border=thin_border)
+        self._escrever_celula(
+            ws, 3, col + 2, medida_inicial_mm,
+            fill=yellow_fill, alignment=center, border=thin_border,
+        )
+
+        for offset, label in enumerate(headers):
+            self._escrever_celula(
+                ws, 4, col + offset, label,
+                font=header_font, fill=header_fill,
+                alignment=header_center, border=thin_border,
+            )
+
+        self._escrever_celula(
+            ws, 5, col, "Refile esq", alignment=center, border=thin_border
+        )
+        self._escrever_celula(
+            ws, 5, col + 2, puxada.refile_esquerdo_mm,
+            fill=peach_fill, alignment=center, border=thin_border,
+        )
+
+        row = 6
+        for idx, pos, largura, eixo in facas:
+            self._escrever_celula(ws, row, col, idx, alignment=center, border=thin_border)
+            self._escrever_celula(
+                ws, row, col + 1, pos,
+                fill=yellow_fill, alignment=center, border=thin_border,
+            )
+            self._escrever_celula(
+                ws, row, col + 2, largura,
+                fill=yellow_fill, alignment=center, border=thin_border,
+            )
+            if eixo == "Inferior":
+                self._escrever_celula(
+                    ws, row, col + 3, largura, alignment=center, border=thin_border
+                )
+                self._escrever_celula(ws, row, col + 4, "", alignment=center, border=thin_border)
+            else:
+                self._escrever_celula(ws, row, col + 3, "", alignment=center, border=thin_border)
+                self._escrever_celula(
+                    ws, row, col + 4, largura, alignment=center, border=thin_border
+                )
+            row += 1
+
+        self._escrever_celula(
+            ws, row, col, "Refile dir", alignment=center, border=thin_border
+        )
+        self._escrever_celula(
+            ws, row, col + 1, pos_final,
+            fill=yellow_fill, alignment=center, border=thin_border,
+        )
+        self._escrever_celula(
+            ws, row, col + 2, puxada.refile_direito_mm,
+            fill=peach_fill, alignment=center, border=thin_border,
+        )
+        row += 1
+        self._escrever_celula(
+            ws, row, col, "TOTAL DE CORTE", alignment=center, border=thin_border
+        )
+        self._escrever_celula(
+            ws, row, col + 2, total_corte,
+            fill=yellow_fill, alignment=center, border=thin_border,
+        )
 
     # ---- dados iniciais ----------------------------------------------------
 
