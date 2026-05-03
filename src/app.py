@@ -600,13 +600,17 @@ class AppMRX(ctk.CTk):
                 bottom=Side(style="thin"),
             )
 
-            for i, p in enumerate(self.plano_atual, start=1):
+            plano_exportacao = self._agrupar_puxadas_iguais_exportacao(
+                self.plano_atual
+            )
+
+            for i, (p, repeticao_total) in enumerate(plano_exportacao, start=1):
                 col = i
                 # Bobinas do padrão (sem repetir pela repeticao)
                 bobina_list: List[int] = [int(bob.largura) for bob in p.bobinas]
 
-                # Cabeçalho com repetição
-                title = f"PUXADA {i:02d}  ({p.repeticao}x)"
+                # Cabeçalho com repetição total, agrupando puxadas iguais
+                title = f"PUXADA {i:02d} ({repeticao_total}x)"
                 self._escrever_celula(ws, row=1, col=col, value=title,
                                       font=header_font, fill=header_fill,
                                       alignment=header_center, border=thin_border)
@@ -620,6 +624,7 @@ class AppMRX(ctk.CTk):
                     ws_facas,
                     puxada=p,
                     indice=i,
+                    repeticao_total=repeticao_total,
                     start_col=1 + (i - 1) * 7,
                     medida_inicial_mm=self.medida_inicial_atual,
                     header_font=header_font,
@@ -662,11 +667,47 @@ class AppMRX(ctk.CTk):
         if border:
             cel.border = border
 
+    @staticmethod
+    def _chave_puxada_exportacao(puxada: Puxada) -> Tuple:
+        """Chave usada para juntar puxadas identicas no Excel."""
+        return (
+            int(puxada.largura_jumbo),
+            tuple(int(bob.largura) for bob in puxada.bobinas),
+            tuple(str(eixo) for eixo in puxada.eixos),
+            int(puxada.refile_esquerdo_mm),
+            int(puxada.refile_direito_mm),
+            bool(puxada.completa_jumbo),
+            str(puxada.faixa_refile),
+        )
+
+    @classmethod
+    def _agrupar_puxadas_iguais_exportacao(
+        cls, plano: List[Puxada]
+    ) -> List[Tuple[Puxada, int]]:
+        """Agrupa puxadas iguais, somando as repeticoes para exportacao."""
+        grupos: List[Tuple[Puxada, int]] = []
+        indice_por_chave: Dict[Tuple, int] = {}
+
+        for puxada in plano:
+            chave = cls._chave_puxada_exportacao(puxada)
+            repeticao = int(puxada.repeticao)
+            if chave in indice_por_chave:
+                idx = indice_por_chave[chave]
+                base, total = grupos[idx]
+                grupos[idx] = (base, total + repeticao)
+                continue
+
+            indice_por_chave[chave] = len(grupos)
+            grupos.append((puxada, repeticao))
+
+        return grupos
+
     def _escrever_bloco_facas_excel(
         self,
         ws,
         puxada: Puxada,
         indice: int,
+        repeticao_total: int,
         start_col: int,
         medida_inicial_mm: int,
         header_font,
@@ -684,7 +725,7 @@ class AppMRX(ctk.CTk):
         headers = ["FACA", "POSICAO", "BOBINAS", "Inferior", "Superior"]
 
         self._escrever_celula(
-            ws, 1, col, f"PUXADA {indice:02d} ({puxada.repeticao}x)",
+            ws, 1, col, f"PUXADA {indice:02d} ({repeticao_total}x)",
             font=header_font, fill=header_fill,
             alignment=header_center, border=thin_border,
         )
