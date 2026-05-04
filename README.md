@@ -1,4 +1,4 @@
-# SmartCut-Sistema de otimizção de Produção
+# SmartCut — Sistema de Otimização de Produção 
 
 Sistema desktop para otimização de corte de bobinas jumbo em bobinas menores, o sistema monta automaticamente as ordens de produção dos materiais.
 
