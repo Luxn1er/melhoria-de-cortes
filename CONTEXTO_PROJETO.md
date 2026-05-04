@@ -2,16 +2,16 @@
 
 ## Visao geral
 
-O MRX Otimizador e uma aplicacao desktop em Python para otimizar cortes de bobinas jumbo em bobinas menores. O sistema resolve um problema de corte unidimensional, respeitando regras industriais de refile, limite de facas e tratamento de sobras.
+O MRX Otimizador e uma aplicacao desktop em Python para otimizar cortes de bobinas jumbo em bobinas menores. O sistema resolve um problema de corte unidimensional, respeitando regras industriais de refile, limite de facas, status de producao e tratamento de sobras.
 
 O usuario informa:
 
 - largura do jumbo, em mm;
 - medida inicial da regua traseira da maquina, em mm;
 - bobinas desejadas, com largura e quantidade;
-- opcionalmente, uma lista colada em lote via Importar Puxadas.
+- opcionalmente, uma lista colada em lote via Importar Puxadas/Planilhas.
 
-Depois disso, o sistema gera um plano de producao com puxadas, repeticoes, refiles, sobras, visualizacao grafica, tabela de facas e exportacao para Excel.
+Depois disso, o sistema gera um plano de producao com puxadas, repeticoes, refiles, status, sobras, visualizacao grafica, tabela de facas e exportacao para Excel.
 
 ## Tecnologias
 
@@ -40,7 +40,7 @@ from src.app import main
 
 ```text
 src/
-  app.py                 Interface principal, estado do app, processamento e exportacao
+  app.py                 Interface principal, estado do app, processamento, status e exportacao
   optimizer.py           Motor de otimizacao das puxadas
   helpers.py             Funcoes auxiliares, layout, residuais e calculo de facas
   knapsack.py            Mochila para melhor combinacao de sobras
@@ -51,6 +51,9 @@ src/
     report.py            Relatorio textual no app
     canvas_viz.py        Visualizacao grafica da puxada
     sobras_window.py     Janela manual para tratamento de sobras
+tests/
+  test_refile_balance.py       Regressao do refile centralizado e facas
+  test_puxada_status_reuso.py  Regressao de reutilizacao por status
 ```
 
 ## Fluxo do usuario
@@ -63,9 +66,10 @@ src/
 6. O sistema otimiza as puxadas automaticamente.
 7. Se sobra nao couber automaticamente, abre a janela de sobras.
 8. O app mostra relatorio, visualizacao da puxada e tabela de facas.
-9. O usuario pode exportar para Excel.
+9. O usuario pode selecionar uma puxada e alterar o status.
+10. O usuario pode exportar para Excel.
 
-## Importar Puxadas
+## Importar Puxadas / Planilhas
 
 Foi adicionada uma janela chamada Importar Puxadas para o usuario colar varias bobinas de uma vez, copiadas de planilha ou texto.
 
@@ -86,6 +90,37 @@ Regras:
 - importacao em lote entra no mesmo estoque do botao Adicionar;
 - o botao Desfazer remove o lote importado inteiro.
 
+## Status das puxadas
+
+Cada puxada possui um status:
+
+```text
+planejado
+em_producao
+finalizado
+```
+
+Labels exibidas na interface:
+
+- `Planejado`: puxada ainda nao iniciada; pode ser reutilizada em uma nova geracao.
+- `Em producao`: puxada ja iniciou na maquina; fica travada.
+- `Finalizado`: puxada concluida; fica travada.
+
+Regra de reprocessamento:
+
+- ao gerar novamente, o sistema preserva as puxadas `em_producao` e `finalizado`;
+- puxadas `planejado` voltam para o estoque de geracao;
+- materiais novos adicionados entram junto com esse estoque livre;
+- o otimizador recalcula apenas o que ainda pode mudar.
+
+O status aparece:
+
+- no seletor de puxada;
+- no relatorio textual;
+- na visualizacao grafica;
+- na exportacao Excel;
+- no historico SQLite (`puxada_linha.status`).
+
 ## Medida inicial e facas
 
 Foi adicionada a Med. inicial para calcular onde posicionar as facas na parte traseira da maquina.
@@ -101,17 +136,17 @@ Exemplo validado:
 
 ```text
 Jumbo: 1565
-Med. inicial: 795
-Refile esquerdo: 10
-Bobinas: 400, 400, 298, 120, 120, 107, 100
+Med. inicial: 778
+Refile esquerdo: 22
+Bobinas: 331, 331, 331, 331, 197
 ```
 
 Resultado:
 
 ```text
-785, 385, -15, -313, -433, -553, -660
-Refile direito: -760
-Total de corte: 1545
+756, 425, 94, -237, -568
+Refile direito: -765
+Total de corte: 1521
 ```
 
 A tabela de facas aparece:
@@ -135,19 +170,26 @@ Ele continua tentando otimizar o plano com:
 - fallback para refile da faixa secundaria;
 - tratamento inteligente de residuais.
 
-O criterio principal em `_melhor_candidato` e o numero de repeticoes:
+O sistema testa padroes por alvo de corte. O limite de seguranca e:
 
 ```python
-score = (reps, -nd, -nb, -re_esq, -re_dir)
+COMPOSICOES_MAX_POR_ALVO = 50_000
 ```
 
-Prioridades:
+Como os refiles geram varios alvos:
 
-1. mais repeticoes;
-2. menos larguras distintas;
-3. menos bobinas no padrao;
-4. menor refile esquerdo;
-5. menor refile direito.
+- F1: refile total de 20 a 30mm, ate 11 alvos;
+- F2: refile total de 31 a 50mm, ate 20 alvos.
+
+Teto teorico por ciclo de busca:
+
+```text
+F1: 11 x 50.000 = 550.000 tentativas
+F2: 20 x 50.000 = 1.000.000 tentativas
+Total: ate 1.550.000 tentativas por ciclo
+```
+
+Na pratica costuma testar menos, porque o DFS corta combinacoes impossiveis por largura, resto minimo e limite de facas.
 
 ## Regras de refile
 
@@ -172,6 +214,16 @@ Faixa secundaria:
 ```
 
 O sistema tenta primeiro a faixa primaria. Se nao encontrar padrao, tenta a secundaria.
+
+O refile agora e repartido de forma mais centralizada. Exemplo:
+
+```text
+Sobra total: 44mm
+Antes: 19mm + 25mm
+Agora: 22mm + 22mm
+```
+
+Esse ajuste alinha as posicoes das facas com a planilha antiga usada na operacao.
 
 ## Limite de facas
 
@@ -204,13 +256,21 @@ O app cria e usa um SQLite local em:
 ProducaoAlt/mrx_otimizador.sqlite3
 ```
 
+Quando rodando pelo executavel, a pasta `ProducaoAlt` fica ao lado do `.exe`.
+
 Tabelas:
 
 - `estoque`
 - `puxada_execucao`
 - `puxada_linha`
 
-O estoque e salvo automaticamente conforme o usuario adiciona, importa, desfaz, limpa ou gera puxadas.
+Campo importante adicionado:
+
+```text
+puxada_linha.status
+```
+
+O estoque e salvo automaticamente conforme o usuario adiciona, importa, desfaz, limpa ou gera puxadas. O banco local e ignorado pelo Git para nao subir dados de uso.
 
 ## Exportacao Excel
 
@@ -231,6 +291,8 @@ Abas:
 - `Puxadas`: padroes gerados, cada puxada em uma coluna;
 - `Facas`: tabela de posicionamento das facas por puxada.
 
+O cabecalho exportado inclui repeticao e status da puxada.
+
 ## Visualizacao
 
 Arquivo:
@@ -244,7 +306,8 @@ Mostra graficamente:
 - largura do jumbo;
 - refile esquerdo e direito;
 - bobinas no eixo superior/inferior;
-- cor da faixa de refile.
+- cor da faixa de refile;
+- status da puxada selecionada.
 
 ## Janela de sobras
 
@@ -269,7 +332,7 @@ Ela permite:
 Instalar dependencias:
 
 ```bash
-pip install customtkinter openpyxl
+pip install customtkinter openpyxl pyinstaller
 ```
 
 Rodar:
@@ -292,20 +355,84 @@ Comando:
 pyinstaller MRX_Otimizador.spec
 ```
 
+Tambem foi gerado:
+
+```text
+dist/MRX_Otimizador.exe
+dist/MRX_Otimizador_Portatil.zip
+```
+
+O executavel foi commitado no GitHub no commit:
+
+```text
+42f1e82 - Adicionar controle de status e executavel
+```
+
 ## Validacao feita
 
-Comando de validacao usado durante as alteracoes:
+Comandos de validacao usados:
 
 ```bash
+python -m unittest discover tests
 python -m compileall src mrx_otimizador.py
 ```
 
-Esse comando compilou os arquivos Python sem erro.
+Testes automatizados existentes:
+
+- `tests/test_refile_balance.py`
+- `tests/test_puxada_status_reuso.py`
+
+## Teste de estresse
+
+Foi feito teste de estresse diretamente no motor de otimizacao, sem abrir a interface.
+
+Resultado pratico observado:
+
+- ate 20 medidas diferentes / 1000 bobinas: cerca de 1s;
+- 40 medidas diferentes / 2000 bobinas: cerca de 8,5s;
+- 50 medidas diferentes / 2500 bobinas: cerca de 22s;
+- 80 a 100 medidas diferentes: pode passar de 12 a 15s;
+- 150 medidas diferentes x1: passou de 20s.
+
+Quantidade alta de bobinas iguais:
+
+- se a medida fecha padrao repetivel, aguenta quantidade enorme;
+- exemplo testado: `309mm x 1.000.000` rodou praticamente instantaneo;
+- se a medida nao fecha padrao e vira sobra, o tempo cresce com a quantidade;
+- exemplo testado: `331mm x 50.000` levou cerca de 5,7s.
+
+Conclusao:
+
+- o gargalo principal nao e a quantidade total de bobinas;
+- o que pesa e a quantidade de larguras diferentes tentando combinar no jumbo;
+- uso recomendado: ate 40 medidas diferentes com milhares de bobinas roda bem;
+- 50 medidas diferentes ainda funciona, mas pode demorar;
+- acima de 80 medidas diferentes depende bastante das medidas.
+
+## GitHub
+
+Repositorio remoto:
+
+```text
+https://github.com/Luxn1er/melhoria-de-cortes
+```
+
+Branch usada:
+
+```text
+master
+```
+
+Ultimo push relevante:
+
+```text
+42f1e82 - Adicionar controle de status e executavel
+```
 
 ## Pontos de atencao
 
 - O projeto possui artefatos de build (`build`, `dist`, `.exe`) na pasta.
-- Nao existem testes automatizados ainda.
+- `build/`, bancos SQLite locais e planilhas exportadas sao ignorados pelo Git.
+- `dist/MRX_Otimizador.exe` e `dist/MRX_Otimizador_Portatil.zip` foram adicionados ao Git por pedido do usuario.
 - O texto com acentos pode aparecer quebrado dependendo do encoding do terminal.
-- O algoritmo principal nao foi alterado pelas funcoes de importacao e facas; essas mudancas afetam entrada, exibicao e exportacao.
-
+- O limite de facas e 23 e foi respeitado nos testes de estresse.
