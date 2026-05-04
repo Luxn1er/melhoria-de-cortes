@@ -67,11 +67,10 @@ python mrx_otimizador.py
 1. **Fase 1** — Busca exaustiva por padrões repetíveis: esgota Faixa Primária → depois Secundária
 2. **Fase 2** — Residuais: mochila para máxima ocupação; sobra ≤ 50mm gera puxada automática, > 50mm abre janela manual
 
-## Licença
-
-Autor
-Desenvolvido por Pedro Juan Moreira Sena 
+## Autor
+Desenvolvido por: Pedro Juan Moreira Sena 
 GitHub: Luxn1er
-Licença
-Projeto proprietário.
+
+## Licença
+ Projeto proprietário.
 Todos os direitos reservados.
