@@ -69,4 +69,9 @@ python mrx_otimizador.py
 
 ## Licença
 
-Proprietário Luxn1er— Todos os direitos reservados.
+Autor
+Desenvolvido por Lu Nier.
+GitHub: Luxn1er
+Licença
+Projeto proprietário.
+Todos os direitos reservados.
