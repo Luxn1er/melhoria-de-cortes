@@ -16,6 +16,12 @@ TAG_CONFIG = {
     "bold": {"foreground": "#FFFFFF"},
 }
 
+STATUS_LABEL = {
+    "planejado": "Planejado",
+    "em_producao": "Em producao",
+    "finalizado": "Finalizado",
+}
+
 
 def configurar_tags(txt: ctk.CTkTextbox) -> None:
     for tag_name, cfg in TAG_CONFIG.items():
@@ -68,7 +74,8 @@ def _render_puxada(
     larguras = [int(b.largura) for b in p.bobinas]
     lista = ", ".join(str(w) for w in larguras) if larguras else "—"
 
-    header = f"PUXADA {i + 1:02d} | {p.repeticao}x | {tag_fx}\n"
+    status = STATUS_LABEL.get(getattr(p, "status", "planejado"), "Planejado")
+    header = f"PUXADA {i + 1:02d} | {p.repeticao}x | {tag_fx} | {status}\n"
     txt.insert("end", header, "bold")
 
     linhas = (

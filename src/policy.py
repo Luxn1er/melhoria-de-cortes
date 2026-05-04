@@ -18,6 +18,21 @@ class RefilePolicy:
     MM_MAX_SECUNDARIO: int = 25
 
     @classmethod
+    def _repartir_em_faixa(
+        cls, trim_total: int, minimo: int, maximo: int, faixa: str
+    ) -> Optional[Tuple[int, int, str]]:
+        candidatos: list[Tuple[int, int, str]] = []
+        for esq in range(minimo, maximo + 1):
+            dir_ = trim_total - esq
+            if minimo <= dir_ <= maximo:
+                candidatos.append((esq, dir_, faixa))
+
+        if not candidatos:
+            return None
+
+        return min(candidatos, key=lambda item: (abs(item[0] - item[1]), item[0]))
+
+    @classmethod
     def repartir(cls, trim_total: int) -> Optional[Tuple[int, int, str]]:
         """
         Tenta encaixar *trim_total* nas faixas de refile.
@@ -26,18 +41,39 @@ class RefilePolicy:
         Prioriza a faixa primária; se não couber, tenta a secundária.
         """
         # Faixa primária
-        for esq in range(cls.MM_MIN_PRIMARIO, cls.MM_MAX_PRIMARIO + 1):
-            dir_ = trim_total - esq
-            if cls.MM_MIN_PRIMARIO <= dir_ <= cls.MM_MAX_PRIMARIO:
-                return esq, dir_, "primaria"
+        primaria = cls._repartir_em_faixa(
+            trim_total, cls.MM_MIN_PRIMARIO, cls.MM_MAX_PRIMARIO, "primaria"
+        )
+        if primaria is not None:
+            return primaria
 
         # Faixa secundária
-        for esq in range(cls.MM_MIN_SECUNDARIO, cls.MM_MAX_SECUNDARIO + 1):
-            dir_ = trim_total - esq
-            if cls.MM_MIN_SECUNDARIO <= dir_ <= cls.MM_MAX_SECUNDARIO:
-                return esq, dir_, "secundaria"
+        secundaria = cls._repartir_em_faixa(
+            trim_total, cls.MM_MIN_SECUNDARIO, cls.MM_MAX_SECUNDARIO, "secundaria"
+        )
+        if secundaria is not None:
+            return secundaria
 
         return None
+
+    @classmethod
+    def repartir_na_faixa(cls, trim_total: int, faixa: str) -> Optional[Tuple[int, int]]:
+        """Retorna o par de refiles mais equilibrado para a faixa informada."""
+        if faixa == "primaria":
+            split = cls._repartir_em_faixa(
+                trim_total, cls.MM_MIN_PRIMARIO, cls.MM_MAX_PRIMARIO, faixa
+            )
+        elif faixa == "secundaria":
+            split = cls._repartir_em_faixa(
+                trim_total, cls.MM_MIN_SECUNDARIO, cls.MM_MAX_SECUNDARIO, faixa
+            )
+        else:
+            split = None
+
+        if split is None:
+            return None
+
+        return split[0], split[1]
 
     @classmethod
     def repartir_longo(cls, trim_total: int) -> Tuple[int, int]:

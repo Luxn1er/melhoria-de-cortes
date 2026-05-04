@@ -48,6 +48,18 @@ def _obter_base_dir() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+STATUS_PLANEJADO = "planejado"
+STATUS_EM_PRODUCAO = "em_producao"
+STATUS_FINALIZADO = "finalizado"
+STATUS_TRAVADOS = {STATUS_EM_PRODUCAO, STATUS_FINALIZADO}
+STATUS_LABELS = {
+    STATUS_PLANEJADO: "Planejado",
+    STATUS_EM_PRODUCAO: "Em producao",
+    STATUS_FINALIZADO: "Finalizado",
+}
+STATUS_POR_LABEL = {label: status for status, label in STATUS_LABELS.items()}
+
+
 # ===========================================================================
 # APP PRINCIPAL
 # ===========================================================================
@@ -181,7 +193,7 @@ class AppMRX(ctk.CTk):
         # Painel de visualização
         self.viz = ctk.CTkFrame(self.main)
         self.viz.grid(row=0, column=1, sticky="nsew")
-        self.viz.grid_rowconfigure(2, weight=1)
+        self.viz.grid_rowconfigure(3, weight=1)
         self.viz.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -194,10 +206,30 @@ class AppMRX(ctk.CTk):
         )
         self.cmb_puxada.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
 
+        self.frame_status_puxada = ctk.CTkFrame(self.viz, fg_color="transparent")
+        self.frame_status_puxada.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
+        self.frame_status_puxada.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            self.frame_status_puxada,
+            text="Status:",
+            anchor="w",
+            font=("Roboto", 12, "bold"),
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8))
+
+        self.cmb_status_puxada = ctk.CTkOptionMenu(
+            self.frame_status_puxada,
+            values=list(STATUS_POR_LABEL.keys()),
+            command=self._on_change_status_puxada,
+        )
+        self.cmb_status_puxada.grid(row=0, column=1, sticky="ew")
+        self.cmb_status_puxada.set(STATUS_LABELS[STATUS_PLANEJADO])
+        self.cmb_status_puxada.configure(state="disabled")
+
         self.canvas = tk.Canvas(
             self.viz, bg="#0f0f10", highlightthickness=1, highlightbackground="#2b2b2b"
         )
-        self.canvas.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.canvas.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 10))
         self.canvas.bind("<Configure>", lambda _e: self._redesenhar_canvas())
 
         # Botão gerar
@@ -392,12 +424,45 @@ class AppMRX(ctk.CTk):
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao limpar.\n{e}")
 
+    # ---- status e reutilizacao --------------------------------------------
+
+    @staticmethod
+    def _status_puxada(puxada: Puxada) -> str:
+        status = str(getattr(puxada, "status", STATUS_PLANEJADO))
+        if status not in STATUS_LABELS:
+            return STATUS_PLANEJADO
+        return status
+
+    @classmethod
+    def _puxada_travada(cls, puxada: Puxada) -> bool:
+        return cls._status_puxada(puxada) in STATUS_TRAVADOS
+
+    @staticmethod
+    def _somar_puxada_ao_estoque(estoque: Dict[int, int], puxada: Puxada) -> None:
+        repeticao = max(1, int(getattr(puxada, "repeticao", 1)))
+        for bobina in puxada.bobinas:
+            largura = int(bobina.largura)
+            estoque[largura] = estoque.get(largura, 0) + repeticao
+
+    def _puxadas_travadas_atuais(self) -> List[Puxada]:
+        return [p for p in self.plano_atual if self._puxada_travada(p)]
+
+    def _estoque_para_geracao(self) -> Dict[int, int]:
+        estoque = {int(w): int(q) for w, q in self.estoque_atividades.items() if int(q) > 0}
+        for puxada in self.plano_atual:
+            if not self._puxada_travada(puxada):
+                self._somar_puxada_ao_estoque(estoque, puxada)
+        return estoque
+
     # ---- processamento -----------------------------------------------------
 
     def processar(self) -> None:
-        if not self.itens_entrada:
+        estoque_geracao = self._estoque_para_geracao()
+        if not estoque_geracao:
             messagebox.showwarning(
-                "Aviso", "Adicione bobinas ao estoque antes de gerar puxadas."
+                "Aviso",
+                "Nao ha material livre para gerar puxadas.\n"
+                "Adicione bobinas novas ou deixe alguma puxada como Planejado.",
             )
             return
         try:
@@ -420,6 +485,9 @@ class AppMRX(ctk.CTk):
             messagebox.showerror("Erro", f"Medida inicial inválida.\n{e}")
             return
 
+        puxadas_preservadas = self._puxadas_travadas_atuais()
+        itens_geracao = sorted(estoque_geracao.items(), key=lambda x: x[0], reverse=True)
+
         self._iniciar_loading("Processando algoritmos...")
 
         def worker() -> None:
@@ -427,7 +495,7 @@ class AppMRX(ctk.CTk):
                 time.sleep(0.12)
                 jumbo = Jumbo(jumbo_val)
                 otimizador = OtimizadorProducao(jumbo)
-                for l, q in self.itens_entrada:
+                for l, q in itens_geracao:
                     otimizador.adicionar_material(l, q)
                 otimizador.rodar_otimizacao(
                     on_progress=lambda f, m: self._progress_queue.put((f, m))
@@ -440,6 +508,7 @@ class AppMRX(ctk.CTk):
                         o.abrir_janela_sobras,
                         o.sugestao_base_residuo,
                         o.sobra_residuo_mm,
+                        puxadas_preservadas=puxadas_preservadas,
                     ),
                 )
             except Exception as e:
@@ -450,7 +519,10 @@ class AppMRX(ctk.CTk):
 
     def _reprocessar_estoque_atual(self, jumbo_mm: int) -> None:
         """Roda otimização novamente após confirmação manual de sobras."""
-        if not self.estoque_atividades:
+        estoque_geracao = {
+            int(w): int(q) for w, q in self.estoque_atividades.items() if int(q) > 0
+        }
+        if not estoque_geracao:
             messagebox.showinfo(
                 "Puxada de sobras",
                 "Composição confirmada e adicionada ao plano.\n"
@@ -466,7 +538,7 @@ class AppMRX(ctk.CTk):
                 jumbo = Jumbo(int(jumbo_mm))
                 otimizador = OtimizadorProducao(jumbo)
                 for l, q in sorted(
-                    self.estoque_atividades.items(), key=lambda x: x[0], reverse=True
+                    estoque_geracao.items(), key=lambda x: x[0], reverse=True
                 ):
                     otimizador.adicionar_material(l, q)
                 otimizador.rodar_otimizacao(
@@ -476,11 +548,12 @@ class AppMRX(ctk.CTk):
                     0,
                     lambda o=otimizador: self._finalizar_processamento(
                         jumbo,
-                        self.plano_atual + o.plano,
+                        o.plano,
                         o.residuais, o.abrir_janela_sobras,
                         o.sugestao_base_residuo,
                         o.sobra_residuo_mm,
                         o.refile_insuficiente_detectado,
+                        puxadas_preservadas=list(self.plano_atual),
                     ),
                 )
             except Exception as e:
@@ -502,9 +575,11 @@ class AppMRX(ctk.CTk):
         sugestao_base_residuo: Optional[List[int]] = None,
         sobra_residuo_mm: int = 0,
         refile_insuficiente_detectado: bool = False,
+        puxadas_preservadas: Optional[List[Puxada]] = None,
     ) -> None:
         try:
-            self.plano_atual = plano
+            plano_final = list(puxadas_preservadas or []) + list(plano)
+            self.plano_atual = plano_final
             self.residuais_atuais = residuais
             self.estoque_atividades = {int(w): int(q) for w, q in residuais}
             self.itens_entrada = sorted(
@@ -512,13 +587,13 @@ class AppMRX(ctk.CTk):
             )
             self.db.substituir_estoque(residuais)
             self.ultima_execucao_id = self.db.salvar_execucao_puxadas(
-                jumbo.largura_mm, plano
+                jumbo.largura_mm, plano_final
             )
 
             self._parar_loading()
             self._atualizar_texto_estoque()
-            self._renderizar_relatorio(plano, residuais)
-            self._set_opcoes_puxada(plano, residuais)
+            self._renderizar_relatorio(plano_final, residuais)
+            self._set_opcoes_puxada(plano_final, residuais)
 
             if abrir_janela_sobras and residuais:
                 self._tratar_residuais(
@@ -610,7 +685,8 @@ class AppMRX(ctk.CTk):
                 bobina_list: List[int] = [int(bob.largura) for bob in p.bobinas]
 
                 # Cabeçalho com repetição total, agrupando puxadas iguais
-                title = f"PUXADA {i:02d} ({repeticao_total}x)"
+                status = STATUS_LABELS[self._status_puxada(p)]
+                title = f"PUXADA {i:02d} ({repeticao_total}x) - {status}"
                 self._escrever_celula(ws, row=1, col=col, value=title,
                                       font=header_font, fill=header_fill,
                                       alignment=header_center, border=thin_border)
@@ -678,6 +754,7 @@ class AppMRX(ctk.CTk):
             int(puxada.refile_direito_mm),
             bool(puxada.completa_jumbo),
             str(puxada.faixa_refile),
+            str(getattr(puxada, "status", STATUS_PLANEJADO)),
         )
 
     @classmethod
@@ -725,7 +802,9 @@ class AppMRX(ctk.CTk):
         headers = ["FACA", "POSICAO", "BOBINAS", "Inferior", "Superior"]
 
         self._escrever_celula(
-            ws, 1, col, f"PUXADA {indice:02d} ({repeticao_total}x)",
+            ws, 1, col,
+            f"PUXADA {indice:02d} ({repeticao_total}x) - "
+            f"{STATUS_LABELS[self._status_puxada(puxada)]}",
             font=header_font, fill=header_fill,
             alignment=header_center, border=thin_border,
         )
@@ -872,23 +951,63 @@ class AppMRX(ctk.CTk):
     # ---- opções e visualização ---------------------------------------------
 
     def _set_opcoes_puxada(
-        self, plano: List[Puxada], residuais: List[Tuple[int, int]] = []
+        self,
+        plano: List[Puxada],
+        residuais: List[Tuple[int, int]] = [],
+        selected_idx: int = 0,
     ) -> None:
         try:
             if not plano:
                 self.cmb_puxada.configure(values=["(sem puxadas)"])
                 self.cmb_puxada.set("(sem puxadas)")
+                self.cmb_status_puxada.set(STATUS_LABELS[STATUS_PLANEJADO])
+                self.cmb_status_puxada.configure(state="disabled")
                 self._redesenhar_canvas()
                 return
-            valores = [f"PUXADA {i}" for i in range(1, len(plano) + 1)]
+
+            selected_idx = max(0, min(int(selected_idx), len(plano) - 1))
+            valores = [
+                f"PUXADA {i} | {STATUS_LABELS[self._status_puxada(p)]}"
+                for i, p in enumerate(plano, start=1)
+            ]
             self.cmb_puxada.configure(values=valores)
-            self.cmb_puxada.set(valores[0])
+            self.cmb_puxada.set(valores[selected_idx])
+            self.cmb_status_puxada.configure(state="normal")
+            self.cmb_status_puxada.set(STATUS_LABELS[self._status_puxada(plano[selected_idx])])
             self._redesenhar_canvas()
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao atualizar lista de puxadas:\n{e}")
 
     def _on_select_puxada(self, _valor: str) -> None:
+        idx = self._indice_puxada_selecionada()
+        if idx is not None and 0 <= idx < len(self.plano_atual):
+            self.cmb_status_puxada.configure(state="normal")
+            self.cmb_status_puxada.set(
+                STATUS_LABELS[self._status_puxada(self.plano_atual[idx])]
+            )
         self._redesenhar_canvas()
+
+    def _on_change_status_puxada(self, label_status: str) -> None:
+        idx = self._indice_puxada_selecionada()
+        if idx is None or idx < 0 or idx >= len(self.plano_atual):
+            return
+
+        status = STATUS_POR_LABEL.get(label_status, STATUS_PLANEJADO)
+        self.plano_atual[idx].status = status
+        self._renderizar_relatorio(self.plano_atual, self.residuais_atuais)
+        self._set_opcoes_puxada(self.plano_atual, self.residuais_atuais, selected_idx=idx)
+        try:
+            jumbo_mm = int(self.ent_jumbo.get())
+        except Exception:
+            jumbo_mm = int(self.plano_atual[idx].largura_jumbo)
+        self.ultima_execucao_id = self.db.salvar_execucao_puxadas(jumbo_mm, self.plano_atual)
+
+    def _indice_puxada_selecionada(self) -> Optional[int]:
+        sel = self.cmb_puxada.get()
+        m = re.search(r"PUXADA\s+(\d+)", sel)
+        if not m:
+            return None
+        return int(m.group(1)) - 1
 
     def _redesenhar_canvas(self) -> None:
         try:
@@ -896,11 +1015,8 @@ class AppMRX(ctk.CTk):
                 desenhar_puxada(self.canvas, None)
                 return
 
-            sel = self.cmb_puxada.get()
-            if not sel.startswith("PUXADA"):
-                return
-            idx = int(sel.split()[-1]) - 1
-            if idx < 0 or idx >= len(self.plano_atual):
+            idx = self._indice_puxada_selecionada()
+            if idx is None or idx < 0 or idx >= len(self.plano_atual):
                 desenhar_puxada(self.canvas, None)
                 return
 

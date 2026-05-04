@@ -49,6 +49,7 @@ class MRXDatabase:
                         refile_dir_mm INTEGER NOT NULL,
                         completa_jumbo INTEGER NOT NULL,
                         faixa_refile TEXT NOT NULL DEFAULT 'primaria',
+                        status TEXT NOT NULL DEFAULT 'planejado',
                         slot_indice INTEGER NOT NULL,
                         largura_mm INTEGER NOT NULL,
                         eixo TEXT NOT NULL,
@@ -57,6 +58,15 @@ class MRXDatabase:
                         FOREIGN KEY (execucao_id) REFERENCES puxada_execucao(id) ON DELETE CASCADE
                     );
                 """)
+                cols = {
+                    str(row[1])
+                    for row in con.execute("PRAGMA table_info(puxada_linha)").fetchall()
+                }
+                if "status" not in cols:
+                    con.execute(
+                        "ALTER TABLE puxada_linha "
+                        "ADD COLUMN status TEXT NOT NULL DEFAULT 'planejado'"
+                    )
         except Exception as exc:
             self._show_error(f"Falha ao inicializar banco:\n{exc}")
 
@@ -124,9 +134,9 @@ class MRXDatabase:
                             """INSERT INTO puxada_linha (
                                 execucao_id, puxada_ordem, repeticao,
                                 refile_esq_mm, refile_dir_mm, completa_jumbo,
-                                faixa_refile, slot_indice, largura_mm, eixo,
+                                faixa_refile, status, slot_indice, largura_mm, eixo,
                                 coord_esq, coord_dir
-                            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                             (
                                 exec_id,
                                 ordem,
@@ -135,6 +145,7 @@ class MRXDatabase:
                                 int(p.refile_direito_mm),
                                 1 if p.completa_jumbo else 0,
                                 str(p.faixa_refile),
+                                str(getattr(p, "status", "planejado")),
                                 int(slot.indice),
                                 int(slot.largura_mm),
                                 str(slot.eixo),

@@ -39,6 +39,11 @@ def desenhar_puxada(
         "secundaria": "Refile Secundario (15-25mm/lado)",
         "residual": "Puxada Residual",
     }.get(puxada.faixa_refile, "")
+    status_txt = {
+        "planejado": "Planejado",
+        "em_producao": "Em producao",
+        "finalizado": "Finalizado",
+    }.get(getattr(puxada, "status", "planejado"), "Planejado")
 
     canvas.create_text(
         x0, y0 - 8, anchor="sw", fill="#bdbdbd",
@@ -46,7 +51,7 @@ def desenhar_puxada(
             f"Jumbo: {puxada.largura_jumbo}mm  |  "
             f"Refile Esq {puxada.refile_esquerdo_mm}mm  |  "
             f"Refile Dir {puxada.refile_direito_mm}mm  |  "
-            f"{faixa_txt}"
+            f"{faixa_txt}  |  {status_txt}"
         ),
     )
 

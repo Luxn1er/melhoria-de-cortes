@@ -15,3 +15,7 @@ ProduçãoAlt/*.xlsx
 
 # PyInstaller build artifacts
 build/
+
+# Local app data beside portable builds
+**/ProduçãoAlt/*.sqlite3
+**/ProduçãoAlt/*.xlsx

@@ -64,25 +64,22 @@ class OtimizadorProducao:
 
     def _pares_refile_faixa(self, faixa: str) -> List[Tuple[int, int]]:
         """
-        Todos os pares (esq, dir) válidos para a faixa.
-        Em F2, exclui pares já inteiramente cobertos por F1 para não repetir o
-        mesmo alvo duas vezes após F1 falhar.
+        Um par equilibrado (esq, dir) para cada total valido da faixa.
+        Em F2, comeca apos o teto total de F1 para nao repetir o mesmo alvo
+        duas vezes depois de F1 falhar.
         """
         if faixa == "primaria":
-            lo = RefilePolicy.MM_MIN_PRIMARIO
-            hi = RefilePolicy.MM_MAX_PRIMARIO
-            return [(e, d) for e in range(lo, hi + 1) for d in range(lo, hi + 1)]
+            total_min = RefilePolicy.MM_MIN_PRIMARIO * 2
+            total_max = RefilePolicy.MM_MAX_PRIMARIO * 2
+        else:
+            total_min = RefilePolicy.MM_MAX_PRIMARIO * 2 + 1
+            total_max = RefilePolicy.MM_MAX_SECUNDARIO * 2
 
-        lo2 = RefilePolicy.MM_MIN_SECUNDARIO
-        hi2 = RefilePolicy.MM_MAX_SECUNDARIO
-        p_lo = RefilePolicy.MM_MIN_PRIMARIO
-        p_hi = RefilePolicy.MM_MAX_PRIMARIO
         out: List[Tuple[int, int]] = []
-        for e in range(lo2, hi2 + 1):
-            for d in range(lo2, hi2 + 1):
-                if p_lo <= e <= p_hi and p_lo <= d <= p_hi:
-                    continue
-                out.append((e, d))
+        for trim_total in range(total_min, total_max + 1):
+            split = RefilePolicy.repartir_na_faixa(trim_total, faixa)
+            if split is not None:
+                out.append(split)
         return out
 
     def _melhor_candidato(

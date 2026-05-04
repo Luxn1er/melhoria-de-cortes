@@ -53,6 +53,7 @@ class Puxada:
     completa_jumbo: bool = True
     repeticao: int = 1
     faixa_refile: str = "primaria"  # "primaria", "secundaria" ou "residual"
+    status: str = "planejado"  # "planejado", "em_producao" ou "finalizado"
 
     def slots_na_regua(self) -> List[SlotNaRegua]:
         return [
