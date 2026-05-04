@@ -70,7 +70,7 @@ python mrx_otimizador.py
 ## Licença
 
 Autor
-Desenvolvido por Lu Nier.
+Desenvolvido por Pedro Juan Moreira Sena 
 GitHub: Luxn1er
 Licença
 Projeto proprietário.
